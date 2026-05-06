@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=1402">
 <title>Wrigley Field Scoreboard</title>
 <style>
   @font-face {
@@ -25,8 +25,10 @@
     background: #1a1a1a;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     min-height: 100vh;
+    padding: 20px 0;
+    overflow-x: auto;
   }
 
   body.obs-mode { background: transparent !important; }
@@ -402,7 +404,9 @@ function renderScoreboard(allGames) {
     .slice(0, 5);
 
   // AL games sorted by start time, max 6
+  // Exclude any game involving the Cubs — those belong to NL rows 11/12 only
   const alGames = allGames
+    .filter(g => g.homeTeamId !== CUBS_ID && g.awayTeamId !== CUBS_ID)
     .filter(g => AL_IDS.has(g.homeTeamId) || AL_IDS.has(g.awayTeamId))
     .filter(g => !(NL_IDS.has(g.homeTeamId) && NL_IDS.has(g.awayTeamId)))
     .sort((a, b) => a.gameTime.localeCompare(b.gameTime))

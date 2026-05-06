@@ -395,18 +395,19 @@ function renderScoreboard(allGames) {
   );
 
   // NL games excluding Cubs, sorted by start time, max 5
+  // Interleague games go on the HOME team's league side only
   const nlGames = allGames
     .filter(g => g.awayTeamId !== CUBS_ID && g.homeTeamId !== CUBS_ID)
-    .filter(g => NL_IDS.has(g.homeTeamId) || NL_IDS.has(g.awayTeamId))
+    .filter(g => NL_IDS.has(g.homeTeamId))  // home team must be NL
     .sort((a, b) => a.gameTime.localeCompare(b.gameTime))
     .slice(0, 5);
 
   // AL games sorted by start time, max 6
-  // Exclude any game involving the Cubs — those belong to NL rows 11/12 only
+  // Exclude Cubs games — those belong to NL rows 11/12 only
+  // Interleague games go on the HOME team's league side only
   const alGames = allGames
     .filter(g => g.homeTeamId !== CUBS_ID && g.awayTeamId !== CUBS_ID)
-    .filter(g => AL_IDS.has(g.homeTeamId) || AL_IDS.has(g.awayTeamId))
-    .filter(g => !(NL_IDS.has(g.homeTeamId) && NL_IDS.has(g.awayTeamId)))
+    .filter(g => AL_IDS.has(g.homeTeamId))  // home team must be AL
     .sort((a, b) => a.gameTime.localeCompare(b.gameTime))
     .slice(0, 6);
 

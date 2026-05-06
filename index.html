@@ -91,6 +91,14 @@
   .slot-sp, .slot-rp { font-size: 9px; color: #e8dab8; }
   .slot-ump  { font-size: 9px; }
   .slot-bso  { font-size: 26px; color: #f5d020; font-family: 'Cyber', 'Franko', monospace; }
+  .slot-led  { font-size: 40px; color: #f5d020; font-family: 'Cyber', monospace;
+               background: transparent; letter-spacing: 2px; white-space: nowrap; overflow: hidden; }
+  .slot-led-crawl { animation: ledCrawl linear forwards; white-space: nowrap; display: inline-block; }
+  .slot-batter-digit { font-size: 26px; color: #ffffff; font-family: 'Cyber', 'Franko', monospace; }
+  @keyframes ledCrawl {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(-100%); }
+  }
   .slot-hits { font-size: 11px; color: #d4a72c; }
   .slot-inn10 { font-size: 12px; font-weight: bold; color: #ffffff; }
   .slot-active { color: #f5d020 !important; }
@@ -161,6 +169,9 @@ const SLOTS = [
   {name:"slot_mid_ump_2b",x:2981,y:2378,w:83,h:55},
   {name:"slot_mid_ump_1b",x:2795,y:2378,w:83,h:55},
   {name:"slot_mid_ump_plate",x:2613,y:2378,w:83,h:55},
+  {name:"slot_led_display",x:1272,y:3562,w:3392,h:245},
+  {name:"slot_mid_batter_tens",x:2811,y:2583,w:100,h:136},
+  {name:"slot_mid_batter_ones",x:2935,y:2583,w:100,h:136},
 ];
 
 // Generate all row slots programmatically
@@ -286,6 +297,7 @@ function parseGame(g) {
     status,
     isFinal:      status === 'Final',
     isLive:       status === 'Live',
+    isPreview:    status === 'Preview',
     awayTeamId:   away.team.id,
     homeTeamId:   home.team.id,
     awayName:     TEAM_NAMES[away.team.id] || away.team.abbreviation,
@@ -457,6 +469,284 @@ function renderScoreboard(allGames) {
   });
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+//  LED DISPLAY ENGINE — 7-Scenario Priority Queue
+// ═══════════════════════════════════════════════════════════════
+
+const LED_PRIORITIES = {
+  PITCH:        1,   // pitch speed + type
+  BATTED_BALL:  2,   // exit velo + launch angle + distance
+  PLAY_RESULT:  3,   // play description text
+  BATTER_UP:    4,   // batter name + season stats
+  SCORE_UPDATE: 5,   // runs scored alert
+  BETWEEN_INN:  6,   // pitcher line / situation
+  IDLE:         7,   // pre-game info or blank
+};
+
+// Duration each scenario holds the display (ms)
+const LED_DURATIONS = {
+  PITCH:        4000,
+  BATTED_BALL:  5000,
+  PLAY_RESULT:  6000,
+  BATTER_UP:    5000,
+  SCORE_UPDATE: 5000,
+  BETWEEN_INN:  8000,
+  IDLE:         0,     // stays until replaced
+};
+
+// Crawl scenarios (text scrolls right to left)
+const LED_CRAWL_SCENARIOS = new Set(['PLAY_RESULT', 'BETWEEN_INN']);
+
+let ledCurrentPriority = 99;
+let ledTimer           = null;
+let ledLastPlayId      = null;
+let ledLastBatterId    = null;
+let ledLastInning      = null;
+
+// ── PITCH TYPE DISPLAY NAMES ──────────────────────────────────
+const PITCH_NAMES = {
+  'FF': 'FOUR-SEAM FASTBALL', 'SI': 'SINKER',       'FC': 'CUTTER',
+  'SL': 'SLIDER',             'CH': 'CHANGEUP',      'CU': 'CURVEBALL',
+  'KC': 'KNUCKLE CURVE',      'FS': 'SPLITTER',      'KN': 'KNUCKLEBALL',
+  'EP': 'EEPHUS',             'SC': 'SCREWBALL',     'FO': 'FORKBALL',
+  'ST': 'SWEEPER',            'SV': 'SLURVE',        'CS': 'SLOW CURVE',
+};
+
+function pitchName(code) {
+  return PITCH_NAMES[code] || code || 'PITCH';
+}
+
+// ── CORE LED DISPLAY FUNCTION ─────────────────────────────────
+function showLED(scenario, text, priority) {
+  // Only show if this scenario has equal or higher priority than current
+  if (priority > ledCurrentPriority) return;
+
+  ledCurrentPriority = priority;
+  clearTimeout(ledTimer);
+
+  const slot = slotMap['slot_led_display'];
+  if (!slot) return;
+
+  let el = document.getElementById('s-slot_led_display');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 's-slot_led_display';
+    el.style.position    = 'absolute';
+    el.style.left        = px(slot.x);
+    el.style.top         = px(slot.y);
+    el.style.width       = px(slot.w);
+    el.style.height      = px(slot.h);
+    el.style.zIndex      = '6';
+    el.style.overflow    = 'hidden';
+    el.style.display     = 'flex';
+    el.style.alignItems  = 'center';
+    el.style.background  = 'transparent';
+    document.getElementById('slots-layer').appendChild(el);
+  }
+
+  const isCrawl = LED_CRAWL_SCENARIOS.has(scenario);
+
+  if (isCrawl) {
+    // Text crawl — animate right to left
+    el.innerHTML = '';
+    const inner = document.createElement('span');
+    inner.className = 'slot-led slot-led-crawl';
+    inner.textContent = text;
+    // Duration based on text length for consistent speed
+    const crawlDuration = Math.max(6000, text.length * 120);
+    inner.style.animationDuration = crawlDuration + 'ms';
+    el.appendChild(inner);
+
+    ledTimer = setTimeout(() => {
+      resetLED();
+    }, crawlDuration);
+  } else {
+    // Static display
+    el.innerHTML = '';
+    const inner = document.createElement('span');
+    inner.className = 'slot-led';
+    inner.style.display     = 'block';
+    inner.style.width       = '100%';
+    inner.style.textAlign   = 'center';
+    inner.textContent       = text;
+    el.appendChild(inner);
+
+    const duration = LED_DURATIONS[scenario];
+    if (duration > 0) {
+      ledTimer = setTimeout(() => {
+        resetLED();
+      }, duration);
+    }
+  }
+}
+
+function resetLED() {
+  ledCurrentPriority = 99;
+  const el = document.getElementById('s-slot_led_display');
+  if (el) el.innerHTML = '';
+}
+
+// ── BATTER NUMBER DISPLAY ─────────────────────────────────────
+function renderBatterNumber(jerseyNumber) {
+  const numStr = jerseyNumber != null ? String(jerseyNumber) : '';
+  const tens = numStr.length >= 2 ? numStr[numStr.length - 2] : '';
+  const ones = numStr.length >= 1 ? numStr[numStr.length - 1] : '';
+  setSlot('slot_mid_batter_tens', tens, 'slot-batter-digit');
+  setSlot('slot_mid_batter_ones', ones, 'slot-batter-digit');
+}
+
+// ── PROCESS LIVE FEED FOR LED SCENARIOS ──────────────────────
+function processLEDFromFeed(feedData, cubsGame) {
+  try {
+    const liveData   = feedData.liveData;
+    const plays      = liveData.plays;
+    const currentPlay = plays.currentPlay;
+    if (!currentPlay) return;
+
+    const playId     = currentPlay.atBatIndex;
+    const result     = currentPlay.result;
+    const matchup    = currentPlay.matchup;
+    const batter     = matchup ? matchup.batter : null;
+    const pitchIndex = currentPlay.pitchIndex || [];
+    const events     = currentPlay.playEvents || [];
+
+    // ── SCENARIO 4: BATTER UP (new at-bat) ───────────────────
+    if (batter && batter.id !== ledLastBatterId) {
+      ledLastBatterId = batter.id;
+      const jersey = batter.jerseyNumber || '';
+      renderBatterNumber(jersey);
+
+      // Get batter season stats if available
+      const stats   = batter.seasonStats ? batter.seasonStats.batting : null;
+      const avg     = stats ? (stats.avg || '.---') : '.---';
+      const hr      = stats ? (stats.homeRuns != null ? stats.homeRuns : '-') : '-';
+      const rbi     = stats ? (stats.rbi      != null ? stats.rbi      : '-') : '-';
+      const name    = (batter.fullName || '').toUpperCase();
+
+      showLED('BATTER_UP',
+        `#${jersey}  ${name}  •  ${avg} AVG  •  ${hr} HR  •  ${rbi} RBI`,
+        LED_PRIORITIES.BATTER_UP);
+    }
+
+    // ── SCENARIO 1: PITCH RESULT ──────────────────────────────
+    // Find the most recent pitch event
+    const pitchEvents = events.filter(e => e.isPitch);
+    if (pitchEvents.length > 0) {
+      const lastPitch = pitchEvents[pitchEvents.length - 1];
+      const pd        = lastPitch.pitchData || {};
+      const speed     = pd.startSpeed ? Math.round(pd.startSpeed) : null;
+      const pType     = lastPitch.details && lastPitch.details.type
+                        ? lastPitch.details.type.code : null;
+      const pResult   = lastPitch.details ? (lastPitch.details.description || '').toUpperCase() : '';
+      const pitchKey  = `${playId}-${pitchEvents.length}`;
+
+      if (pitchKey !== ledLastPlayId) {
+        ledLastPlayId = pitchKey;
+        if (speed && pType) {
+          const pName = pitchName(pType);
+
+          // ── SCENARIO 2: BATTED BALL ───────────────────────
+          const hd = lastPitch.hitData || {};
+          if (hd.launchSpeed) {
+            const exitVelo = Math.round(hd.launchSpeed);
+            const angle    = hd.launchAngle != null ? Math.round(hd.launchAngle) : null;
+            const dist     = hd.totalDistance ? Math.round(hd.totalDistance) : null;
+            let battedText = `${speed} MPH ${pName}  •  ${exitVelo} MPH EXIT VELO`;
+            if (angle != null) battedText += `  •  ${angle}° LAUNCH`;
+            if (dist)          battedText += `  •  ${dist} FT`;
+            showLED('BATTED_BALL', battedText, LED_PRIORITIES.BATTED_BALL);
+          } else {
+            // Regular pitch
+            showLED('PITCH',
+              `${speed} MPH  •  ${pName}  •  ${pResult}`,
+              LED_PRIORITIES.PITCH);
+          }
+        }
+      }
+    }
+
+    // ── SCENARIO 3: PLAY RESULT (completed play) ─────────────
+    if (result && result.description && playId !== ledLastPlayId) {
+      const isOut     = result.eventType === 'strikeout' ||
+                        result.eventType === 'field_out' ||
+                        result.eventType === 'force_out' ||
+                        result.eventType === 'double_play';
+      const isHit     = result.eventType === 'single'   ||
+                        result.eventType === 'double'   ||
+                        result.eventType === 'triple'   ||
+                        result.eventType === 'home_run';
+      const isScoring = result.rbi > 0;
+
+      if (isHit || isOut || isScoring) {
+        const desc = result.description.toUpperCase();
+        showLED('PLAY_RESULT', desc, LED_PRIORITIES.PLAY_RESULT);
+
+        // ── SCENARIO 5: SCORE UPDATE (if runs scored) ────────
+        if (isScoring && cubsGame) {
+          const awayR = cubsGame.awayRuns;
+          const homeR = cubsGame.homeRuns;
+          const away  = cubsGame.awayName;
+          const isCubsHome = cubsGame.homeTeamId === CUBS_ID;
+          const cubsR = isCubsHome ? homeR : awayR;
+          const visR  = isCubsHome ? awayR : homeR;
+          const inning = cubsGame.currentInning;
+          const half   = cubsGame.homeBatting ? 'BOTTOM' : 'TOP';
+
+          setTimeout(() => {
+            const leader = cubsR > visR ? 'CUBS LEAD' :
+                           visR > cubsR ? `${away} LEADS` : 'TIED';
+            showLED('SCORE_UPDATE',
+              `${leader}  ${cubsR}-${visR}  •  ${half} ${inning}`,
+              LED_PRIORITIES.SCORE_UPDATE);
+          }, 4000); // show after play result clears
+        }
+      }
+    }
+
+    // ── SCENARIO 6: BETWEEN INNING ────────────────────────────
+    const currentInning = liveData.linescore
+      ? liveData.linescore.currentInning : 0;
+    const inningState   = liveData.linescore
+      ? (liveData.linescore.inningState || '') : '';
+    const isBetween     = inningState === 'Middle' || inningState === 'End';
+
+    if (isBetween && currentInning !== ledLastInning) {
+      ledLastInning = currentInning;
+      // Show current pitcher's line
+      const pitcher = matchup ? matchup.pitcher : null;
+      if (pitcher) {
+        const ps   = pitcher.seasonStats ? pitcher.seasonStats.pitching : null;
+        const era  = ps ? (ps.era || '-.--') : '-.--';
+        const so   = ps ? (ps.strikeOuts != null ? ps.strikeOuts : '-') : '-';
+        const name = (pitcher.fullName || '').toUpperCase();
+        showLED('BETWEEN_INN',
+          `NOW PITCHING: #${pitcher.jerseyNumber || ''}  ${name}  •  ERA ${era}  •  ${so} K THIS SEASON`,
+          LED_PRIORITIES.BETWEEN_INN);
+      }
+    }
+
+  } catch(e) {
+    console.warn('LED processing error:', e);
+  }
+}
+
+// ── SCENARIO 7: IDLE (pre-game) ───────────────────────────────
+function showIdleLED(cubsGame) {
+  if (!cubsGame || cubsGame.isLive || cubsGame.isFinal) return;
+  const opp     = cubsGame.awayName;
+  const gt      = cubsGame.gameTime;
+  // Parse game time to CT display
+  const gameDate = new Date(gt);
+  const timeStr  = gameDate.toLocaleTimeString('en-US', {
+    timeZone: 'America/Chicago',
+    hour: 'numeric', minute: '2-digit'
+  });
+  showLED('IDLE',
+    `CUBS VS ${opp}  •  WRIGLEY FIELD  •  TODAY ${timeStr} CT`,
+    LED_PRIORITIES.IDLE);
+}
+
 // ── CLOCK ─────────────────────────────────────────────────────
 function updateClock() {
   const ct  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}));
@@ -479,7 +769,7 @@ async function refresh() {
     );
     renderScoreboard(games);
 
-    // Fetch live BSO only for live Cubs games (skip for historic/final)
+    // Fetch live feed for Cubs game — drives BSO, LED, and batter number
     const cubsGame = games.find(
       g => g.homeTeamId === CUBS_ID || g.awayTeamId === CUBS_ID
     );
@@ -488,10 +778,14 @@ async function refresh() {
         const feed = await fetchLiveFeed(cubsGame.gamePk);
         const bso  = parseBSO(feed);
         renderCenter(cubsGame, bso);
+        processLEDFromFeed(feed, cubsGame);
       } catch(e) {
-        console.warn('BSO fetch failed:', e);
+        console.warn('Live feed fetch failed:', e);
         renderCenter(cubsGame, null);
       }
+    } else if (cubsGame && cubsGame.isPreview) {
+      renderCenter(cubsGame, null);
+      showIdleLED(cubsGame);
     } else if (cubsGame) {
       renderCenter(cubsGame, null);
     }

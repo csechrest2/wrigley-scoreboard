@@ -307,7 +307,7 @@ function parseGame(g) {
 
 // ── RENDER ONE TEAM ROW ───────────────────────────────────────
 function renderRow(league, rowNum, name, sp, innings, totalRuns,
-                   isFinal, isActiveBatter, isCubs) {
+                   isFinal, isActiveBatter, isCubs, currentInning) {
   const p   = `slot_${league}_row${rowNum}`;
   const base = isCubs ? 'slot-cubs' : '';
 
@@ -319,11 +319,9 @@ function renderRow(league, rowNum, name, sp, innings, totalRuns,
     const val     = innings[i - 1];
     const display = (val === null || val === undefined) ? '' : String(val);
 
-    // Yellow: this team is currently batting AND this is the live inning
-    // The live inning is the last inning that has a value in their array
-    const lastFilledIdx = innings.reduce((last, v, idx) =>
-      (v !== null && v !== undefined) ? idx : last, -1);
-    const isActiveInn = isActiveBatter && (i - 1) === lastFilledIdx && display !== '';
+    // Yellow only if: this team is actively batting AND this is the current live inning
+    // Uses currentInning from the API directly — never highlights completed innings
+    const isActiveInn = isActiveBatter && !isFinal && (i === currentInning);
 
     setSlot(`${p}_inn${i}`, display,
       isActiveInn ? 'slot-number slot-active' : `slot-number ${base}`);
@@ -421,9 +419,9 @@ function renderScoreboard(allGames) {
     const awayRow = idx * 2 + 1;
     const homeRow = idx * 2 + 2;
     renderRow('nl', awayRow, game.awayName, game.awaySP,
-      game.awayInnings, game.awayRuns, game.isFinal, game.awayBatting, false);
+      game.awayInnings, game.awayRuns, game.isFinal, game.awayBatting, false, game.currentInning);
     renderRow('nl', homeRow, game.homeName, game.homeSP,
-      game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false);
+      game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false, game.currentInning);
   });
 
   // Cubs always rows 11 (visitor) and 12 (Cubs)
@@ -440,9 +438,9 @@ function renderScoreboard(allGames) {
     const cubsBatting  = isCubsHome ? cubsGame.homeBatting : cubsGame.awayBatting;
 
     renderRow('nl', 11, visName,  visSP,  visInnings,  visRuns,
-      cubsGame.isFinal, visBatting,  false);
+      cubsGame.isFinal, visBatting,  false, cubsGame.currentInning);
     renderRow('nl', 12, 'CUBS',   cubsSP, cubsInnings, cubsRuns,
-      cubsGame.isFinal, cubsBatting, true);
+      cubsGame.isFinal, cubsBatting, true,  cubsGame.currentInning);
 
     // BSO fetched separately — see refresh() below
   }
@@ -452,9 +450,9 @@ function renderScoreboard(allGames) {
     const awayRow = idx * 2 + 1;
     const homeRow = idx * 2 + 2;
     renderRow('al', awayRow, game.awayName, game.awaySP,
-      game.awayInnings, game.awayRuns, game.isFinal, game.awayBatting, false);
+      game.awayInnings, game.awayRuns, game.isFinal, game.awayBatting, false, game.currentInning);
     renderRow('al', homeRow, game.homeName, game.homeSP,
-      game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false);
+      game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false, game.currentInning);
   });
 }
 

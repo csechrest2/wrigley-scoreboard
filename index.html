@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wrigley Field Scoreboard</title>
+<style>
+  @font-face {
+    font-family: 'Franko';
+    src: url('Franko-E1SA.ttf') format('truetype');
+    font-weight: bold;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: 'Cyber';
+    src: url('Cyber.otf') format('opentype');
+    font-weight: bold;
+    font-style: normal;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+
+  body.obs-mode { background: transparent !important; }
+
+  #scoreboard-wrapper {
+    position: relative;
+    width: 1402px;
+    height: 1057px;
+  }
+
+  #base-plate {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1402px;
+    height: 1057px;
+    z-index: 1;
+  }
+
+  #clock-container {
+    position: absolute;
+    left: 671px; top: 419px;
+    width: 122px; height: 122px;
+    z-index: 10;
+    overflow: hidden;
+  }
+
+  #clock-face-img {
+    position: absolute;
+    width: 1402px; height: 1057px;
+    left: -671px; top: -419px;
+    pointer-events: none;
+  }
+
+  .clock-hand {
+    position: absolute;
+    width: 1402px; height: 1057px;
+    left: -671px; top: -419px;
+    transform-origin: 732px 480px;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+  .slot {
+    position: absolute;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Franko', 'Arial Narrow', Arial, sans-serif;
+    font-weight: bold;
+    line-height: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    color: #ffffff;
+    font-size: 11px;
+  }
+
+  .slot-teamname { justify-content: flex-start !important; padding-left: 3px; font-size: 9px; color: #ffffff; font-weight: bold; }
+  .slot-number { font-size: 12px; font-weight: bold; color: #ffffff; }
+  .slot-sp, .slot-rp { font-size: 9px; color: #e8dab8; }
+  .slot-ump  { font-size: 9px; }
+  .slot-bso  { font-size: 26px; color: #f5d020; font-family: 'Cyber', 'Franko', monospace; }
+  .slot-hits { font-size: 11px; color: #d4a72c; }
+  .slot-inn10 { font-size: 12px; font-weight: bold; color: #ffffff; }
+  .slot-active { color: #f5d020 !important; }
+  .slot-cubs   { color: #ffffff; }
+
+  #status-bar {
+    position: absolute;
+    bottom: -26px; left: 0; width: 100%;
+    text-align: center;
+    font-family: monospace; font-size: 11px; color: #555;
+  }
+  #status-text { color: #4a8a4a; }
+  #error-text  { color: #c04040; display: none; }
+</style>
+</head>
+<body>
+<div id="scoreboard-wrapper">
+  <img id="base-plate" src="scoreboard_base.png" alt="Wrigley Scoreboard">
+
+  <div id="clock-container">
+    <img id="clock-face-img" src="clock_face.png" alt="">
+    <img id="hour-hand"   class="clock-hand" src="clock_hand_hour.png" alt="">
+    <img id="minute-hand" class="clock-hand" src="clock_hand_minute.png" alt="">
+  </div>
+
+  <div id="slots-layer"></div>
+
+  <div id="status-bar">
+    <span id="status-text">Loading...</span>
+    <span id="error-text"></span>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  WRIGLEY FIELD SCOREBOARD — Phase 2: Live MLB API
+// ═══════════════════════════════════════════════════════════════
+
+const SCALE      = 1402 / 5610;
+const REFRESH_MS = 30000;
+const CUBS_ID    = 112;
+
+const NL_IDS = new Set([109,112,113,115,119,120,121,134,135,137,138,143,144,146,158]);
+const AL_IDS = new Set([108,110,111,114,116,117,118,133,136,139,140,141,142,145,147]);
+
+// ── TEAM NAMES ────────────────────────────────────────────────
+const TEAM_NAMES = {
+  144:'ATLANTA',      121:'NEW YORK',       143:'PHILADELPHIA',
+  120:'WASHINGTON',   146:'MIAMI',          158:'MILWAUKEE',
+  113:'CINCINNATI',   134:'PITTSBURGH',     138:'ST. LOUIS',
+  112:'CUBS',         109:'ARIZONA',        119:'LOS ANGELES',
+  137:'SAN FRANCISCO',135:'SAN DIEGO',      115:'COLORADO',
+  147:'NEW YORK',     111:'BOSTON',         141:'TORONTO',
+  139:'TAMPA BAY',    110:'BALTIMORE',      114:'CLEVELAND',
+  116:'DETROIT',      142:'MINNESOTA',      118:'KANSAS CITY',
+  145:'CHICAGO',      117:'HOUSTON',        136:'SEATTLE',
+  133:'OAKLAND',      108:'LOS ANGELES',    140:'TEXAS',
+};
+
+// ── SLOT COORDINATES ──────────────────────────────────────────
+const SLOTS = [
+  {name:"slot_mid_out",x:2876,y:3180,w:103,h:141},
+  {name:"slot_mid_strike",x:3100,y:2879,w:103,h:141},
+  {name:"slot_mid_ball",x:2651,y:2879,w:103,h:141},
+  {name:"slot_mid_cubs_hits",x:3026,y:3373,w:71,h:80},
+  {name:"slot_mid_visitor_hits",x:2751,y:3373,w:71,h:80},
+  {name:"slot_mid_ump_3b",x:3161,y:2378,w:83,h:55},
+  {name:"slot_mid_ump_2b",x:2981,y:2378,w:83,h:55},
+  {name:"slot_mid_ump_1b",x:2795,y:2378,w:83,h:55},
+  {name:"slot_mid_ump_plate",x:2613,y:2378,w:83,h:55},
+];
+
+// Generate all row slots programmatically
+['nl','al'].forEach(lg => {
+  for (let r = 1; r <= 12; r++) {
+    const base = lg === 'nl'
+      ? { spX:1023, rpX:1129, tnX:1231, tnW:382,
+          i1X:1637, i2X:1720, i3X:1805, i4X:1890, i5X:1994,
+          i6X:2076, i7X:2172, i8X:2260, i9X:2346, i10X:2430,
+          spW:81, rpW:79, i1W:61, i2W:60, i3W:60, i4W:81, i5W:60,
+          i6W:73, i7W:62, i8W:57, i9W:59, i10W:109 }
+      : { spX:3363, rpX:3469, tnX:3571, tnW:382,
+          i1X:3977, i2X:4060, i3X:4145, i4X:4230, i5X:4334,
+          i6X:4416, i7X:4512, i8X:4600, i9X:4686, i10X:4770,
+          spW:81, rpW:79, i1W:61, i2W:60, i3W:60, i4W:81, i5W:60,
+          i6W:73, i7W:62, i8W:57, i9W:59, i10W:109 };
+
+    // Row Y positions — read directly from the extracted slot data
+    const rowY = {
+      1:2404, 2:2490, 3:2583, 4:2663, 5:2760,
+      6:2847, 7:2937, 8:3019, 9:3110, 10:3200, 11:3287, 12:3373
+    }[r];
+    const H = 62;
+
+    SLOTS.push({name:`slot_${lg}_row${r}_sp`,       x:base.spX,  y:rowY, w:base.spW,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_rp`,       x:base.rpX,  y:rowY, w:base.rpW,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_teamname`, x:base.tnX,  y:rowY, w:base.tnW,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn1`,     x:base.i1X,  y:rowY, w:base.i1W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn2`,     x:base.i2X,  y:rowY, w:base.i2W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn3`,     x:base.i3X,  y:rowY, w:base.i3W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn4`,     x:base.i4X,  y:rowY, w:base.i4W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn5`,     x:base.i5X,  y:rowY, w:base.i5W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn6`,     x:base.i6X,  y:rowY, w:base.i6W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn7`,     x:base.i7X,  y:rowY, w:base.i7W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn8`,     x:base.i8X,  y:rowY, w:base.i8W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn9`,     x:base.i9X,  y:rowY, w:base.i9W,  h:H});
+    SLOTS.push({name:`slot_${lg}_row${r}_inn10`,    x:base.i10X, y:rowY, w:base.i10W, h:H});
+  }
+});
+
+const slotMap = {};
+SLOTS.forEach(s => { slotMap[s.name] = s; });
+
+// ── DOM HELPERS ───────────────────────────────────────────────
+const px = v => Math.round(v * SCALE) + 'px';
+const layer = document.getElementById('slots-layer');
+
+function setSlot(name, text, cls) {
+  const s = slotMap[name];
+  if (!s) return;
+  let el = document.getElementById('s-' + name);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 's-' + name;
+    el.className = 'slot';
+    el.style.left   = px(s.x);
+    el.style.top    = px(s.y);
+    el.style.width  = px(s.w);
+    el.style.height = px(s.h);
+    layer.appendChild(el);
+  }
+  el.textContent = (text === null || text === undefined) ? '' : String(text);
+  el.className = 'slot ' + (cls || '');
+  // teamname left-align
+  el.style.justifyContent = name.includes('_teamname') ? 'flex-start' : 'center';
+  el.style.paddingLeft    = name.includes('_teamname') ? '3px' : '0';
+}
+
+function clearRows(league, rows) {
+  rows.forEach(r => {
+    const p = `slot_${league}_row${r}`;
+    ['sp','rp','teamname',
+     'inn1','inn2','inn3','inn4','inn5','inn6','inn7','inn8','inn9','inn10'
+    ].forEach(f => setSlot(`${p}_${f}`, '', ''));
+  });
+}
+
+// ── DATE ──────────────────────────────────────────────────────
+function todayCT() {
+  // Allow ?date=YYYY-MM-DD in the URL for historical testing
+  const param = new URLSearchParams(window.location.search).get('date');
+  if (param && /^\d{4}-\d{2}-\d{2}$/.test(param)) return param;
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+}
+
+// ── MLB API ───────────────────────────────────────────────────
+async function fetchSchedule(date) {
+  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${date}` +
+              `&hydrate=linescore,probablePitcher,team,officials`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ── PARSE GAME ────────────────────────────────────────────────
+function parseGame(g) {
+  const away = g.teams.away;
+  const home = g.teams.home;
+  const ls   = g.linescore || {};
+  const innings = ls.innings || [];
+
+  const state      = ls.inningState || '';
+  const currentInn = ls.currentInning || 0;
+  // 'Top'/'Middle' = away batting; 'Bottom'/'End' = home batting
+  const awayBatting = state === 'Top'    || state === 'Middle';
+  const homeBatting = state === 'Bottom' || state === 'End';
+
+  const awayInnings = [], homeInnings = [];
+  const maxInn = Math.max(9, innings.length > 0 ? innings[innings.length-1].num : 0);
+  for (let i = 1; i <= maxInn; i++) {
+    const inn = innings.find(x => x.num === i);
+    awayInnings.push(inn && inn.away != null ? inn.away.runs : null);
+    homeInnings.push(inn && inn.home != null ? inn.home.runs : null);
+  }
+
+  const status    = g.status.abstractGameState;
+  const awayPP    = away.probablePitcher;
+  const homePP    = home.probablePitcher;
+
+  return {
+    gamePk:       g.gamePk,
+    gameTime:     g.gameDate || '',
+    status,
+    isFinal:      status === 'Final',
+    isLive:       status === 'Live',
+    awayTeamId:   away.team.id,
+    homeTeamId:   home.team.id,
+    awayName:     TEAM_NAMES[away.team.id] || away.team.abbreviation,
+    homeName:     TEAM_NAMES[home.team.id] || home.team.abbreviation,
+    awaySP:       awayPP ? String(awayPP.jerseyNumber || '') : '',
+    homeSP:       homePP ? String(homePP.jerseyNumber || '') : '',
+    awayInnings,
+    homeInnings,
+    awayRuns:     (ls.teams && ls.teams.away) ? (ls.teams.away.runs  || 0) : 0,
+    homeRuns:     (ls.teams && ls.teams.home) ? (ls.teams.home.runs  || 0) : 0,
+    awayHits:     (ls.teams && ls.teams.away) ? (ls.teams.away.hits  || 0) : 0,
+    homeHits:     (ls.teams && ls.teams.home) ? (ls.teams.home.hits  || 0) : 0,
+    currentInning: currentInn,
+    awayBatting,
+    homeBatting,
+    officials:    g.officials || [],
+  };
+}
+
+// ── RENDER ONE TEAM ROW ───────────────────────────────────────
+function renderRow(league, rowNum, name, sp, innings, totalRuns,
+                   isFinal, isActiveBatter, isCubs) {
+  const p   = `slot_${league}_row${rowNum}`;
+  const base = isCubs ? 'slot-cubs' : '';
+
+  setSlot(`${p}_teamname`, name, `slot-teamname ${base}`);
+  setSlot(`${p}_sp`,       sp,   `slot-sp ${base}`);
+  setSlot(`${p}_rp`,       '',   'slot-rp');
+
+  for (let i = 1; i <= 9; i++) {
+    const val     = innings[i - 1];
+    const display = (val === null || val === undefined) ? '' : String(val);
+
+    // Yellow: this team is currently batting AND this is the live inning
+    // The live inning is the last inning that has a value in their array
+    const lastFilledIdx = innings.reduce((last, v, idx) =>
+      (v !== null && v !== undefined) ? idx : last, -1);
+    const isActiveInn = isActiveBatter && (i - 1) === lastFilledIdx && display !== '';
+
+    setSlot(`${p}_inn${i}`, display,
+      isActiveInn ? 'slot-number slot-active' : `slot-number ${base}`);
+  }
+
+  // Extra innings beyond 9
+  for (let i = 10; i <= innings.length; i++) {
+    // Extra innings use inn9 slot visually — just update inn9 for now
+    // Full extra-inning support is a Phase 3 enhancement
+  }
+
+  setSlot(`${p}_inn10`,
+    isFinal ? String(totalRuns) : '',
+    `slot-inn10 ${base}`);
+}
+
+
+// ── LIVE GAME FEED (BSO counts for Cubs game) ─────────────────
+async function fetchLiveFeed(gamePk) {
+  const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live?fields=liveData,plays,currentPlay,count`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Live feed HTTP ${res.status}`);
+  return res.json();
+}
+
+function parseBSO(feedData) {
+  try {
+    const count = feedData.liveData.plays.currentPlay.count;
+    return {
+      balls:   count.balls   != null ? count.balls   : 0,
+      strikes: count.strikes != null ? count.strikes : 0,
+      outs:    count.outs    != null ? count.outs    : 0,
+    };
+  } catch(e) {
+    return { balls: 0, strikes: 0, outs: 0 };
+  }
+}
+
+// ── RENDER CENTER (Cubs game umpires + hits) ──────────────────
+function renderCenter(game, bso) {
+  const roleMap = {
+    'Home Plate': 'slot_mid_ump_plate',
+    'First Base':  'slot_mid_ump_1b',
+    'Second Base': 'slot_mid_ump_2b',
+    'Third Base':  'slot_mid_ump_3b',
+  };
+  Object.entries(roleMap).forEach(([role, slotName]) => {
+    const u = (game.officials || []).find(x => x.officialType === role);
+    setSlot(slotName, u ? String(u.official.jerseyNumber || '') : '', 'slot-ump');
+  });
+
+  setSlot('slot_mid_visitor_hits', String(game.awayHits), 'slot-hits');
+  setSlot('slot_mid_cubs_hits',    String(game.homeHits), 'slot-hits');
+
+  // Ball / Strike / Out from live feed
+  if (bso) {
+    setSlot('slot_mid_ball',   String(bso.balls),   'slot-bso');
+    setSlot('slot_mid_strike', String(bso.strikes), 'slot-bso');
+    setSlot('slot_mid_out',    String(bso.outs),    'slot-bso');
+  } else {
+    setSlot('slot_mid_ball',   '', 'slot-bso');
+    setSlot('slot_mid_strike', '', 'slot-bso');
+    setSlot('slot_mid_out',    '', 'slot-bso');
+  }
+}
+
+// ── MAIN RENDER ───────────────────────────────────────────────
+function renderScoreboard(allGames) {
+  const cubsGame = allGames.find(
+    g => g.homeTeamId === CUBS_ID || g.awayTeamId === CUBS_ID
+  );
+
+  // NL games excluding Cubs, sorted by start time, max 5
+  const nlGames = allGames
+    .filter(g => g.awayTeamId !== CUBS_ID && g.homeTeamId !== CUBS_ID)
+    .filter(g => NL_IDS.has(g.homeTeamId) || NL_IDS.has(g.awayTeamId))
+    .sort((a, b) => a.gameTime.localeCompare(b.gameTime))
+    .slice(0, 5);
+
+  // AL games sorted by start time, max 6
+  const alGames = allGames
+    .filter(g => AL_IDS.has(g.homeTeamId) || AL_IDS.has(g.awayTeamId))
+    .filter(g => !(NL_IDS.has(g.homeTeamId) && NL_IDS.has(g.awayTeamId)))
+    .sort((a, b) => a.gameTime.localeCompare(b.gameTime))
+    .slice(0, 6);
+
+  // Clear everything
+  clearRows('nl', [1,2,3,4,5,6,7,8,9,10,11,12]);
+  clearRows('al', [1,2,3,4,5,6,7,8,9,10,11,12]);
+
+  // NL rows 1-10 (5 games × 2 rows)
+  nlGames.forEach((game, idx) => {
+    const awayRow = idx * 2 + 1;
+    const homeRow = idx * 2 + 2;
+    renderRow('nl', awayRow, game.awayName, game.awaySP,
+      game.awayInnings, game.awayRuns, game.isFinal, game.awayBatting, false);
+    renderRow('nl', homeRow, game.homeName, game.homeSP,
+      game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false);
+  });
+
+  // Cubs always rows 11 (visitor) and 12 (Cubs)
+  if (cubsGame) {
+    const isCubsHome   = cubsGame.homeTeamId === CUBS_ID;
+    const visName      = isCubsHome ? cubsGame.awayName    : cubsGame.homeName;
+    const visSP        = isCubsHome ? cubsGame.awaySP      : cubsGame.homeSP;
+    const visInnings   = isCubsHome ? cubsGame.awayInnings : cubsGame.homeInnings;
+    const visRuns      = isCubsHome ? cubsGame.awayRuns    : cubsGame.homeRuns;
+    const cubsInnings  = isCubsHome ? cubsGame.homeInnings : cubsGame.awayInnings;
+    const cubsRuns     = isCubsHome ? cubsGame.homeRuns    : cubsGame.awayRuns;
+    const cubsSP       = isCubsHome ? cubsGame.homeSP      : cubsGame.awaySP;
+    const visBatting   = isCubsHome ? cubsGame.awayBatting : cubsGame.homeBatting;
+    const cubsBatting  = isCubsHome ? cubsGame.homeBatting : cubsGame.awayBatting;
+
+    renderRow('nl', 11, visName,  visSP,  visInnings,  visRuns,
+      cubsGame.isFinal, visBatting,  false);
+    renderRow('nl', 12, 'CUBS',   cubsSP, cubsInnings, cubsRuns,
+      cubsGame.isFinal, cubsBatting, true);
+
+    // BSO fetched separately — see refresh() below
+  }
+
+  // AL rows 1-12 (6 games × 2 rows)
+  alGames.forEach((game, idx) => {
+    const awayRow = idx * 2 + 1;
+    const homeRow = idx * 2 + 2;
+    renderRow('al', awayRow, game.awayName, game.awaySP,
+      game.awayInnings, game.awayRuns, game.isFinal, game.awayBatting, false);
+    renderRow('al', homeRow, game.homeName, game.homeSP,
+      game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false);
+  });
+}
+
+// ── CLOCK ─────────────────────────────────────────────────────
+function updateClock() {
+  const ct  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'}));
+  const h   = ct.getHours() % 12, m = ct.getMinutes(), s = ct.getSeconds();
+  document.getElementById('hour-hand').style.transform
+    = `rotate(${h*30 + m*0.5}deg)`;
+  document.getElementById('minute-hand').style.transform
+    = `rotate(${m*6 + s*0.1}deg)`;
+}
+
+// ── POLL ──────────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const data  = await fetchSchedule(todayCT());
+    const games = [];
+    (data.dates || []).forEach(d =>
+      (d.games || []).forEach(g => {
+        try { games.push(parseGame(g)); } catch(e) {}
+      })
+    );
+    renderScoreboard(games);
+
+    // Fetch live BSO only for live Cubs games (skip for historic/final)
+    const cubsGame = games.find(
+      g => g.homeTeamId === CUBS_ID || g.awayTeamId === CUBS_ID
+    );
+    if (cubsGame && cubsGame.isLive) {
+      try {
+        const feed = await fetchLiveFeed(cubsGame.gamePk);
+        const bso  = parseBSO(feed);
+        renderCenter(cubsGame, bso);
+      } catch(e) {
+        console.warn('BSO fetch failed:', e);
+        renderCenter(cubsGame, null);
+      }
+    } else if (cubsGame) {
+      renderCenter(cubsGame, null);
+    }
+
+    const now = new Date().toLocaleTimeString('en-US',{timeZone:'America/Chicago'});
+    const displayDate = todayCT();
+    const isHistoric  = new URLSearchParams(window.location.search).get('date');
+    const modeLabel   = isHistoric ? `Historic: ${displayDate}` : 'Live';
+    document.getElementById('status-text').textContent =
+      `${modeLabel} · ${games.length} games · Updated ${now} CT`;
+    document.getElementById('error-text').style.display = 'none';
+  } catch(err) {
+    console.error(err);
+    document.getElementById('error-text').textContent = 'API error — retrying in 30s';
+    document.getElementById('error-text').style.display = 'inline';
+  }
+}
+
+// ── OBS MODE ──────────────────────────────────────────────────
+if (new URLSearchParams(window.location.search).get('obs') === '1')
+  document.body.classList.add('obs-mode');
+
+// ── INIT ──────────────────────────────────────────────────────
+updateClock();
+setInterval(updateClock, 1000);
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

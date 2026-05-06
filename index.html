@@ -91,12 +91,12 @@
   .slot-sp, .slot-rp { font-size: 9px; color: #e8dab8; }
   .slot-ump  { font-size: 9px; }
   .slot-bso  { font-size: 26px; color: #f5d020; font-family: 'Cyber', 'Franko', monospace; }
-  .slot-led  { font-size: 40px; color: #f5d020; font-family: 'Cyber', monospace;
-               background: transparent; letter-spacing: 2px; white-space: nowrap; overflow: hidden; }
+  .slot-led  { font-size: 28px; color: #f5d020; font-family: 'Cyber', monospace;
+               background: transparent; letter-spacing: 1px; white-space: nowrap; overflow: hidden; }
   .slot-led-crawl { animation: ledCrawl linear forwards; white-space: nowrap; display: inline-block; }
   .slot-batter-digit { font-size: 26px; color: #ffffff; font-family: 'Cyber', 'Franko', monospace; }
   @keyframes ledCrawl {
-    from { transform: translateX(100%); }
+    from { transform: translateX(848px); }
     to   { transform: translateX(-100%); }
   }
   .slot-hits { font-size: 11px; color: #d4a72c; }
@@ -547,37 +547,48 @@ function showLED(scenario, text, priority) {
 
   const isCrawl = LED_CRAWL_SCENARIOS.has(scenario);
 
+  const LED_W = Math.round(3392 * (1402/5610)); // slot width at display scale = 848px
+
   if (isCrawl) {
-    // Text crawl — animate right to left
+    // Crawl — text scrolls right to left, no size constraint needed
     el.innerHTML = '';
     const inner = document.createElement('span');
     inner.className = 'slot-led slot-led-crawl';
     inner.textContent = text;
-    // Duration based on text length for consistent speed
-    const crawlDuration = Math.max(6000, text.length * 120);
+    // Speed: consistent px/sec regardless of length
+    const pxPerSec = 120;
+    const crawlDuration = Math.round((LED_W + text.length * 17) / pxPerSec * 1000);
     inner.style.animationDuration = crawlDuration + 'ms';
     el.appendChild(inner);
+    ledTimer = setTimeout(resetLED, crawlDuration);
 
-    ledTimer = setTimeout(() => {
-      resetLED();
-    }, crawlDuration);
   } else {
-    // Static display
+    // Static — centered, auto-shrink font until text fits within slot width
     el.innerHTML = '';
+    el.style.justifyContent = 'center';
+    el.style.alignItems     = 'center';
+    el.style.display        = 'flex';
+
     const inner = document.createElement('span');
-    inner.className = 'slot-led';
-    inner.style.display     = 'block';
-    inner.style.width       = '100%';
-    inner.style.textAlign   = 'center';
-    inner.textContent       = text;
+    inner.className          = 'slot-led';
+    inner.style.display      = 'inline-block';
+    inner.style.textAlign    = 'center';
+    inner.style.whiteSpace   = 'nowrap';
+    inner.textContent        = text;
     el.appendChild(inner);
 
+    // Start at 28px, shrink by 1px until text fits within slot width
+    let fontSize = 28;
+    inner.style.fontSize = fontSize + 'px';
+    requestAnimationFrame(() => {
+      while (inner.scrollWidth > LED_W && fontSize > 14) {
+        fontSize--;
+        inner.style.fontSize = fontSize + 'px';
+      }
+    });
+
     const duration = LED_DURATIONS[scenario];
-    if (duration > 0) {
-      ledTimer = setTimeout(() => {
-        resetLED();
-      }, duration);
-    }
+    if (duration > 0) ledTimer = setTimeout(resetLED, duration);
   }
 }
 
@@ -625,7 +636,7 @@ function processLEDFromFeed(feedData, cubsGame) {
       const name    = (batter.fullName || '').toUpperCase();
 
       showLED('BATTER_UP',
-        `#${jersey}  ${name}  •  ${avg} AVG  •  ${hr} HR  •  ${rbi} RBI`,
+        `#${jersey} ${name}  ${avg}  ${hr}HR  ${rbi}RBI`,
         LED_PRIORITIES.BATTER_UP);
     }
 
@@ -652,14 +663,21 @@ function processLEDFromFeed(feedData, cubsGame) {
             const exitVelo = Math.round(hd.launchSpeed);
             const angle    = hd.launchAngle != null ? Math.round(hd.launchAngle) : null;
             const dist     = hd.totalDistance ? Math.round(hd.totalDistance) : null;
-            let battedText = `${speed} MPH ${pName}  •  ${exitVelo} MPH EXIT VELO`;
-            if (angle != null) battedText += `  •  ${angle}° LAUNCH`;
-            if (dist)          battedText += `  •  ${dist} FT`;
+            let battedText = `${exitVelo} MPH`;
+            if (angle != null) battedText += `  ${angle > 0 ? angle+'° LAUNCH' : 'GB'}`;
+            if (dist)          battedText += `  ${dist} FT`;
             showLED('BATTED_BALL', battedText, LED_PRIORITIES.BATTED_BALL);
           } else {
             // Regular pitch
+            // Abbreviate pitch name for display
+            const shortPName = pName.length > 12
+              ? pName.replace('FOUR-SEAM ','4S ').replace('TWO-SEAM ','2S ')
+                     .replace('CHANGEUP','CH').replace('CURVEBALL','CB')
+                     .replace('KNUCKLE CURVE','KC').replace('SPLITTER','SPL')
+                     .replace('FASTBALL','FB').replace('SWEEPER','SWP')
+              : pName;
             showLED('PITCH',
-              `${speed} MPH  •  ${pName}  •  ${pResult}`,
+              `${speed} MPH  ${shortPName}  ${pResult}`,
               LED_PRIORITIES.PITCH);
           }
         }
@@ -697,7 +715,7 @@ function processLEDFromFeed(feedData, cubsGame) {
             const leader = cubsR > visR ? 'CUBS LEAD' :
                            visR > cubsR ? `${away} LEADS` : 'TIED';
             showLED('SCORE_UPDATE',
-              `${leader}  ${cubsR}-${visR}  •  ${half} ${inning}`,
+              `${leader}  ${cubsR}-${visR}  ${half} ${inning}`,
               LED_PRIORITIES.SCORE_UPDATE);
           }, 4000); // show after play result clears
         }

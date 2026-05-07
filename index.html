@@ -353,7 +353,8 @@ function renderRow(league, rowNum, name, sp, innings, totalRuns,
 
 // ── LIVE GAME FEED (BSO counts for Cubs game) ─────────────────
 async function fetchLiveFeed(gamePk) {
-  const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live?fields=liveData,plays,currentPlay,count`;
+  // Request full liveData — fields filter was too restrictive and cut nested data
+  const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Live feed HTTP ${res.status}`);
   return res.json();
@@ -775,50 +776,55 @@ function updateClock() {
     = `rotate(${m*6 + s*0.1}deg)`;
 }
 
-// ── POLL ──────────────────────────────────────────────────────
-async function refresh() {
+// ── GAME STATE (shared between loops) ────────────────────────
+let currentGames    = [];
+let currentCubsGame = null;
+
+// ── MAIN LOOP: inning scores every 30s ───────────────────────
+async function refreshScores() {
   try {
-    const data  = await fetchSchedule(todayCT());
+    const data = await fetchSchedule(todayCT());
     const games = [];
     (data.dates || []).forEach(d =>
       (d.games || []).forEach(g => {
         try { games.push(parseGame(g)); } catch(e) {}
       })
     );
-    renderScoreboard(games);
-
-    // Fetch live feed for Cubs game — drives BSO, LED, and batter number
-    const cubsGame = games.find(
+    currentGames    = games;
+    currentCubsGame = games.find(
       g => g.homeTeamId === CUBS_ID || g.awayTeamId === CUBS_ID
     );
-    if (cubsGame && cubsGame.isLive) {
-      try {
-        const feed = await fetchLiveFeed(cubsGame.gamePk);
-        const bso  = parseBSO(feed);
-        renderCenter(cubsGame, bso);
-        processLEDFromFeed(feed, cubsGame);
-      } catch(e) {
-        console.warn('Live feed fetch failed:', e);
-        renderCenter(cubsGame, null);
-      }
-    } else if (cubsGame && cubsGame.isPreview) {
-      renderCenter(cubsGame, null);
-      showIdleLED(cubsGame);
-    } else if (cubsGame) {
-      renderCenter(cubsGame, null);
+    renderScoreboard(games);
+
+    // Handle non-live Cubs game center + LED from schedule data
+    if (currentCubsGame && !currentCubsGame.isLive) {
+      renderCenter(currentCubsGame, null);
+      if (currentCubsGame.isPreview) showIdleLED(currentCubsGame);
     }
 
+    const isHistoric = new URLSearchParams(window.location.search).get('date');
+    const modeLabel  = isHistoric ? `Historic: ${todayCT()}` : 'Live';
     const now = new Date().toLocaleTimeString('en-US',{timeZone:'America/Chicago'});
-    const displayDate = todayCT();
-    const isHistoric  = new URLSearchParams(window.location.search).get('date');
-    const modeLabel   = isHistoric ? `Historic: ${displayDate}` : 'Live';
     document.getElementById('status-text').textContent =
       `${modeLabel} · ${games.length} games · Updated ${now} CT`;
     document.getElementById('error-text').style.display = 'none';
   } catch(err) {
-    console.error(err);
-    document.getElementById('error-text').textContent = 'API error — retrying in 30s';
+    console.error('Score refresh error:', err);
+    document.getElementById('error-text').textContent = 'API error — retrying';
     document.getElementById('error-text').style.display = 'inline';
+  }
+}
+
+// ── LIVE FEED LOOP: BSO + LED every 8s during live Cubs game ─
+async function refreshLiveFeed() {
+  if (!currentCubsGame || !currentCubsGame.isLive) return;
+  try {
+    const feed = await fetchLiveFeed(currentCubsGame.gamePk);
+    const bso  = parseBSO(feed);
+    renderCenter(currentCubsGame, bso);
+    processLEDFromFeed(feed, currentCubsGame);
+  } catch(e) {
+    console.warn('Live feed error:', e);
   }
 }
 
@@ -829,8 +835,14 @@ if (new URLSearchParams(window.location.search).get('obs') === '1')
 // ── INIT ──────────────────────────────────────────────────────
 updateClock();
 setInterval(updateClock, 1000);
-refresh();
-setInterval(refresh, REFRESH_MS);
+
+// Score loop: every 30 seconds for all games
+refreshScores();
+setInterval(refreshScores, 30000);
+
+// Live feed loop: every 8 seconds — only fires when Cubs game is live
+// Drives BSO counts, LED board, and batter number
+setInterval(refreshLiveFeed, 8000);
 </script>
 </body>
 </html>

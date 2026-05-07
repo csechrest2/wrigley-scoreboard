@@ -352,12 +352,57 @@ function renderRow(league, rowNum, name, sp, innings, totalRuns,
 
 
 // ── LIVE GAME FEED (BSO counts for Cubs game) ─────────────────
+// ── LIVE FEED STATE ──────────────────────────────────────────
+let liveFeedCache     = null;   // full game state, updated incrementally
+let liveFeedTimestamp = null;   // last received timecode for diffPatch
+
 async function fetchLiveFeed(gamePk) {
-  // Request full liveData — fields filter was too restrictive and cut nested data
-  const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Live feed HTTP ${res.status}`);
-  return res.json();
+  if (!liveFeedTimestamp || !liveFeedCache) {
+    // First call — fetch full feed to establish baseline
+    const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Live feed HTTP ${res.status}`);
+    liveFeedCache = await res.json();
+    liveFeedTimestamp = liveFeedCache?.metaData?.timeStamp || null;
+    return liveFeedCache;
+  } else {
+    // Subsequent calls — fetch only what changed (tiny payload)
+    const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live/diffPatch` +
+                `?startTimecode=${liveFeedTimestamp}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`DiffPatch HTTP ${res.status}`);
+    const diff = await res.json();
+
+    // If diff has content, merge into cache
+    if (diff && diff.liveData) {
+      liveFeedCache = deepMerge(liveFeedCache, diff);
+    }
+    // Update timestamp if new one came back
+    if (diff?.metaData?.timeStamp) {
+      liveFeedTimestamp = diff.metaData.timeStamp;
+    }
+    return liveFeedCache;
+  }
+}
+
+// Deep merge helper for diffPatch responses
+function deepMerge(target, source) {
+  if (!source) return target;
+  const result = Object.assign({}, target);
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      result[key] = deepMerge(target[key] || {}, source[key]);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
+}
+
+// Reset cache when game changes
+function resetLiveFeedCache() {
+  liveFeedCache     = null;
+  liveFeedTimestamp = null;
 }
 
 function parseBSO(feedData) {
@@ -798,6 +843,7 @@ async function refreshScores() {
 
     // Handle non-live Cubs game center + LED from schedule data
     if (currentCubsGame && !currentCubsGame.isLive) {
+      resetLiveFeedCache(); // clear cache so next live fetch starts fresh
       renderCenter(currentCubsGame, null);
       if (currentCubsGame.isPreview) showIdleLED(currentCubsGame);
     }
@@ -840,9 +886,9 @@ setInterval(updateClock, 1000);
 refreshScores();
 setInterval(refreshScores, 30000);
 
-// Live feed loop: every 8 seconds — only fires when Cubs game is live
-// Drives BSO counts, LED board, and batter number
-setInterval(refreshLiveFeed, 8000);
+// Live feed loop: every 2 seconds — diffPatch means tiny payloads
+// Only fires when Cubs game is live. Drives BSO, LED, batter number.
+setInterval(refreshLiveFeed, 2000);
 </script>
 </body>
 </html>

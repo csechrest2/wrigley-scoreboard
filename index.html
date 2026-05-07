@@ -33,6 +33,22 @@
 
   body.obs-mode { background: transparent !important; }
 
+  /* Background video */
+  #bg-video {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    opacity: 1;
+  }
+
+  /* Hide background in OBS mode */
+  body.obs-mode #bg-video { display: none; }
+
+  /* Ensure scoreboard sits above video */
+  #scoreboard-wrapper { position: relative; z-index: 1; }
+
   #scoreboard-wrapper {
     position: relative;
     width: 1402px;
@@ -115,6 +131,11 @@
 </style>
 </head>
 <body>
+<!-- Background video -->
+<video id="bg-video" autoplay muted loop playsinline>
+  <source src="solitary-cloud-floating-on-bright-blue-sky-2025-12-17-19-57-15-utc.mov" type="video/mp4">
+</video>
+
 <div id="scoreboard-wrapper">
   <img id="base-plate" src="scoreboard_base.png" alt="Wrigley Scoreboard">
 

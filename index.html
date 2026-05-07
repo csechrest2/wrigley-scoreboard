@@ -384,16 +384,37 @@ function parseBSO(feedData) {
 }
 
 // ── RENDER CENTER (Cubs game umpires + hits) ──────────────────
-function renderCenter(game, bso) {
+// Store umpires from live feed separately since schedule hydration
+// doesn't always return them reliably
+let cachedUmpires = [];
+
+function renderCenter(game, bso, officials) {
+  // Use freshly passed officials, or fall back to cache, or game.officials
+  const umps = (officials && officials.length > 0)
+    ? officials
+    : (cachedUmpires.length > 0 ? cachedUmpires : (game.officials || []));
+
+  if (officials && officials.length > 0) cachedUmpires = officials;
+
   const roleMap = {
     'Home Plate': 'slot_mid_ump_plate',
     'First Base':  'slot_mid_ump_1b',
     'Second Base': 'slot_mid_ump_2b',
     'Third Base':  'slot_mid_ump_3b',
   };
+  // Diagnostic log — remove after confirming umpire data works
+  if (officials && officials.length > 0) {
+    console.log('[UMPIRES]', officials.map(u => ({
+      type: u.officialType,
+      name: u.official?.fullName,
+      jersey: u.official?.jerseyNumber || u.official?.primaryNumber
+    })));
+  }
   Object.entries(roleMap).forEach(([role, slotName]) => {
-    const u = (game.officials || []).find(x => x.officialType === role);
-    setSlot(slotName, u ? String(u.official.jerseyNumber || '') : '', 'slot-ump');
+    const u = umps.find(x => x.officialType === role);
+    // Jersey number may be on official.jerseyNumber or official.primaryNumber
+    const num = u ? (u.official.jerseyNumber || u.official.primaryNumber || '') : '';
+    setSlot(slotName, String(num), 'slot-ump');
   });
 
   setSlot('slot_mid_visitor_hits', String(game.awayHits), 'slot-hits');
@@ -644,16 +665,28 @@ function processLEDFromFeed(feedData, cubsGame) {
     // ── SCENARIO 4: BATTER UP (new at-bat) ───────────────────
     if (batter && batter.id !== ledLastBatterId) {
       ledLastBatterId = batter.id;
-      const jersey = batter.jerseyNumber || '';
+
+      // Jersey number and season stats live in boxscore.teams players map
+      const boxscore    = feedData.liveData?.boxscore?.teams || {};
+      const allPlayers  = Object.assign({},
+        boxscore.home?.players || {},
+        boxscore.away?.players || {}
+      );
+      const playerKey   = `ID${batter.id}`;
+      const playerData  = allPlayers[playerKey] || {};
+      const jersey      = playerData.jerseyNumber
+                       || playerData.person?.primaryNumber
+                       || '';
+      const stats       = playerData.seasonStats?.batting || {};
+      const avg         = stats.avg         || '.---';
+      const hr          = stats.homeRuns    != null ? stats.homeRuns : '-';
+      const rbi         = stats.rbi         != null ? stats.rbi      : '-';
+      const name        = (batter.fullName  || playerData.person?.fullName || '').toUpperCase();
+      // Diagnostic — remove after confirming data paths work
+      console.log('[BATTER]', { id: batter.id, playerKey, jersey, avg, hr, rbi, name,
+        playerDataKeys: Object.keys(playerData).slice(0,8) });
+
       renderBatterNumber(jersey);
-
-      // Get batter season stats if available
-      const stats   = batter.seasonStats ? batter.seasonStats.batting : null;
-      const avg     = stats ? (stats.avg || '.---') : '.---';
-      const hr      = stats ? (stats.homeRuns != null ? stats.homeRuns : '-') : '-';
-      const rbi     = stats ? (stats.rbi      != null ? stats.rbi      : '-') : '-';
-      const name    = (batter.fullName || '').toUpperCase();
-
       showLED('BATTER_UP',
         `#${jersey} ${name}  ${avg}  ${hr}HR  ${rbi}RBI`,
         LED_PRIORITIES.BATTER_UP);
@@ -817,7 +850,7 @@ async function refreshScores() {
     // Handle non-live Cubs game center + LED from schedule data
     if (currentCubsGame && !currentCubsGame.isLive) {
       resetLiveFeedCache(); // clear cache so next live fetch starts fresh
-      renderCenter(currentCubsGame, null);
+      renderCenter(currentCubsGame, null, []);
       if (currentCubsGame.isPreview) showIdleLED(currentCubsGame);
     }
 
@@ -838,9 +871,10 @@ async function refreshScores() {
 async function refreshLiveFeed() {
   if (!currentCubsGame || !currentCubsGame.isLive) return;
   try {
-    const feed = await fetchLiveFeed(currentCubsGame.gamePk);
-    const bso  = parseBSO(feed);
-    renderCenter(currentCubsGame, bso);
+    const feed     = await fetchLiveFeed(currentCubsGame.gamePk);
+    const bso      = parseBSO(feed);
+    const officials = feed?.gameData?.officials || [];
+    renderCenter(currentCubsGame, bso, officials);
     processLEDFromFeed(feed, currentCubsGame);
   } catch(e) {
     console.warn('Live feed error:', e);

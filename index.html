@@ -179,6 +179,52 @@ const TEAM_NAMES = {
   133:'OAKLAND',      108:'LOS ANGELES',    140:'TEXAS',
 };
 
+
+// ── VENUE NAMES (MLB team ID → ballpark name) ─────────────────
+const VENUE_NAMES = {
+  // NL
+  144: 'TRUIST PARK',          121: 'CITI FIELD',
+  143: 'CITIZENS BANK PARK',   120: 'NATIONALS PARK',
+  146: 'LOANDEPOT PARK',       158: 'AMERICAN FAMILY FIELD',
+  113: 'GREAT AMERICAN BALL PARK', 134: 'PNC PARK',
+  138: 'BUSCH STADIUM',        112: 'WRIGLEY FIELD',
+  109: 'CHASE FIELD',          119: 'DODGER STADIUM',
+  137: 'ORACLE PARK',          135: 'PETCO PARK',
+  115: 'COORS FIELD',
+  // AL
+  147: 'YANKEE STADIUM',       111: 'FENWAY PARK',
+  141: 'ROGERS CENTRE',        139: 'TROPICANA FIELD',
+  110: 'ORIOLE PARK',          114: 'PROGRESSIVE FIELD',
+  116: 'COMERICA PARK',        142: 'TARGET FIELD',
+  118: 'KAUFFMAN STADIUM',     145: 'GUARANTEED RATE FIELD',
+  117: 'MINUTE MAID PARK',     136: 'T-MOBILE PARK',
+  133: 'OAKLAND COLISEUM',     108: 'ANGEL STADIUM',
+  140: 'GLOBE LIFE FIELD',
+};
+
+
+// ── TEAM NICKNAMES (MLB team ID → nickname for LED display) ───
+const TEAM_NICKNAMES = {
+  // NL East
+  144: 'BRAVES',        121: 'METS',          143: 'PHILLIES',
+  120: 'NATIONALS',     146: 'MARLINS',
+  // NL Central
+  158: 'BREWERS',       113: 'REDS',           134: 'PIRATES',
+  138: 'CARDINALS',     112: 'CUBS',
+  // NL West
+  109: 'D-BACKS',       119: 'DODGERS',        137: 'GIANTS',
+  135: 'PADRES',        115: 'ROCKIES',
+  // AL East
+  147: 'YANKEES',       111: 'RED SOX',        141: 'BLUE JAYS',
+  139: 'RAYS',          110: 'ORIOLES',
+  // AL Central
+  114: 'GUARDIANS',     116: 'TIGERS',         142: 'TWINS',
+  118: 'ROYALS',        145: 'WHITE SOX',
+  // AL West
+  117: 'ASTROS',        136: 'MARINERS',       133: 'ATHLETICS',
+  108: 'ANGELS',        140: 'RANGERS',
+};
+
 // ── SLOT COORDINATES ──────────────────────────────────────────
 const SLOTS = [
   {name:"slot_mid_out",x:2876,y:3180,w:103,h:141},
@@ -490,23 +536,27 @@ function renderScoreboard(allGames) {
       game.homeInnings, game.homeRuns, game.isFinal, game.homeBatting, false, game.currentInning);
   });
 
-  // Cubs always rows 11 (visitor) and 12 (Cubs)
+  // Cubs rows 11/12 — home or away logic
   if (cubsGame) {
-    const isCubsHome   = cubsGame.homeTeamId === CUBS_ID;
-    const visName      = isCubsHome ? cubsGame.awayName    : cubsGame.homeName;
-    const visSP        = isCubsHome ? cubsGame.awaySP      : cubsGame.homeSP;
-    const visInnings   = isCubsHome ? cubsGame.awayInnings : cubsGame.homeInnings;
-    const visRuns      = isCubsHome ? cubsGame.awayRuns    : cubsGame.homeRuns;
-    const cubsInnings  = isCubsHome ? cubsGame.homeInnings : cubsGame.awayInnings;
-    const cubsRuns     = isCubsHome ? cubsGame.homeRuns    : cubsGame.awayRuns;
-    const cubsSP       = isCubsHome ? cubsGame.homeSP      : cubsGame.awaySP;
-    const visBatting   = isCubsHome ? cubsGame.awayBatting : cubsGame.homeBatting;
-    const cubsBatting  = isCubsHome ? cubsGame.homeBatting : cubsGame.awayBatting;
+    const isCubsHome = cubsGame.homeTeamId === CUBS_ID;
 
-    renderRow('nl', 11, visName,  visSP,  visInnings,  visRuns,
-      cubsGame.isFinal, visBatting,  false, cubsGame.currentInning);
-    renderRow('nl', 12, 'CUBS',   cubsSP, cubsInnings, cubsRuns,
-      cubsGame.isFinal, cubsBatting, true,  cubsGame.currentInning);
+    if (isCubsHome) {
+      // Cubs at Wrigley: row 11 = visitor, row 12 = Cubs
+      renderRow('nl', 11, cubsGame.awayName, cubsGame.awaySP,
+        cubsGame.awayInnings, cubsGame.awayRuns,
+        cubsGame.isFinal, cubsGame.awayBatting, false, cubsGame.currentInning);
+      renderRow('nl', 12, 'CUBS', cubsGame.homeSP,
+        cubsGame.homeInnings, cubsGame.homeRuns,
+        cubsGame.isFinal, cubsGame.homeBatting, true, cubsGame.currentInning);
+    } else {
+      // Cubs on road: row 11 = Cubs (away), row 12 = home team
+      renderRow('nl', 11, 'CUBS', cubsGame.awaySP,
+        cubsGame.awayInnings, cubsGame.awayRuns,
+        cubsGame.isFinal, cubsGame.awayBatting, true, cubsGame.currentInning);
+      renderRow('nl', 12, cubsGame.homeName, cubsGame.homeSP,
+        cubsGame.homeInnings, cubsGame.homeRuns,
+        cubsGame.isFinal, cubsGame.homeBatting, false, cubsGame.currentInning);
+    }
 
     // BSO fetched separately — see refresh() below
   }
@@ -825,16 +875,28 @@ function processLEDFromFeed(feedData, cubsGame) {
 // ── SCENARIO 7: IDLE (pre-game) ───────────────────────────────
 function showIdleLED(cubsGame) {
   if (!cubsGame || cubsGame.isLive || cubsGame.isFinal) return;
-  const opp     = cubsGame.awayName;
-  const gt      = cubsGame.gameTime;
-  // Parse game time to CT display
-  const gameDate = new Date(gt);
+
+  const isCubsHome = cubsGame.homeTeamId === CUBS_ID;
+
+  // Opponent nickname (RANGERS, DODGERS, etc.)
+  const oppId       = isCubsHome ? cubsGame.awayTeamId : cubsGame.homeTeamId;
+  const oppNickname = TEAM_NICKNAMES[oppId] || TEAM_NAMES[oppId] || '';
+
+  // Venue: Wrigley for home, opponent's park for road
+  const venueId = isCubsHome ? CUBS_ID : cubsGame.homeTeamId;
+  const venue   = VENUE_NAMES[venueId] || 'WRIGLEY FIELD';
+
+  // "VS" at home, "AT" on the road
+  const prefix = isCubsHome ? 'CUBS VS' : 'CUBS AT';
+
+  const gameDate = new Date(cubsGame.gameTime);
   const timeStr  = gameDate.toLocaleTimeString('en-US', {
     timeZone: 'America/Chicago',
     hour: 'numeric', minute: '2-digit'
   });
+
   showLED('IDLE',
-    `CUBS VS ${opp}  •  WRIGLEY FIELD  •  TODAY ${timeStr} CT`,
+    `${prefix} ${oppNickname}  •  ${venue}  •  TODAY ${timeStr} CT`,
     LED_PRIORITIES.IDLE);
 }
 

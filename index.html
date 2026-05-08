@@ -225,6 +225,48 @@ const TEAM_NICKNAMES = {
   108: 'ANGELS',        140: 'RANGERS',
 };
 
+
+// ── HISTORICAL TEAM NAME RESOLVER ────────────────────────────
+// The MLB API returns correct historical names for past dates
+// (e.g. "Montreal Expos" not "Washington Nationals" for 1984)
+// We extract the city portion directly from the API name
+// so historical queries automatically use the correct era name
+
+const TEAM_SUFFIXES = [
+  'Blue Jays','Red Sox','White Sox','Devil Rays','Diamondbacks',
+  'D-backs','Athletics','Nationals','Guardians','Indians','Cardinals',
+  'Brewers','Expos','Mets','Yankees','Giants','Dodgers','Padres',
+  'Braves','Phillies','Pirates','Reds','Astros','Twins','Royals',
+  'Orioles','Mariners','Rangers','Tigers','Rockies','Marlins','Rays',
+  'Angels','Cubs','Rays'
+].sort((a,b) => b.length - a.length); // longest first to avoid partial matches
+
+const TEAM_NAME_SPECIALS = {
+  'Chicago Cubs':        'CUBS',
+  'Chicago White Sox':   'CHICAGO',
+  'Boston Red Sox':      'BOSTON',
+  'Tampa Bay Devil Rays':'TAMPA BAY',
+  'Tampa Bay Rays':      'TAMPA BAY',
+  'Florida Marlins':     'FLORIDA',
+  'Miami Marlins':       'MIAMI',
+};
+
+function resolveTeamName(apiFullName, teamId) {
+  // Special cases first
+  if (TEAM_NAME_SPECIALS[apiFullName]) return TEAM_NAME_SPECIALS[apiFullName];
+
+  // Strip nickname suffix to get city
+  for (const suffix of TEAM_SUFFIXES) {
+    if (apiFullName.endsWith(suffix)) {
+      const city = apiFullName.slice(0, -suffix.length).trim();
+      if (city) return city.toUpperCase();
+    }
+  }
+
+  // Fallback to our static map, then raw name
+  return TEAM_NAMES[teamId] || apiFullName.toUpperCase();
+}
+
 // ── SLOT COORDINATES ──────────────────────────────────────────
 const SLOTS = [
   {name:"slot_mid_out",x:2876,y:3180,w:103,h:141},
@@ -367,8 +409,8 @@ function parseGame(g) {
     isPreview:    status === 'Preview',
     awayTeamId:   away.team.id,
     homeTeamId:   home.team.id,
-    awayName:     TEAM_NAMES[away.team.id] || away.team.abbreviation,
-    homeName:     TEAM_NAMES[home.team.id] || home.team.abbreviation,
+    awayName:     resolveTeamName(away.team.name || '', away.team.id),
+    homeName:     resolveTeamName(home.team.name || '', home.team.id),
     awaySP:       awayPP ? String(awayPP.jerseyNumber || '') : '',
     homeSP:       homePP ? String(homePP.jerseyNumber || '') : '',
     awayInnings,

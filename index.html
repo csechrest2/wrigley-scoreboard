@@ -526,8 +526,13 @@ function renderCenter(game, bso, officials) {
     setSlot(slotName, String(num), 'slot-ump');
   });
 
-  setSlot('slot_mid_visitor_hits', String(game.awayHits), 'slot-hits');
-  setSlot('slot_mid_cubs_hits',    String(game.homeHits), 'slot-hits');
+  // VIS = opponent hits always, CUBS = Cubs hits always
+  // The Wrigley board labels are permanent — VIS means opponent, CUBS means Cubs
+  const isCubsHome = game.homeTeamId === CUBS_ID;
+  const oppHits  = isCubsHome ? game.awayHits : game.homeHits;
+  const cubsHits = isCubsHome ? game.homeHits : game.awayHits;
+  setSlot('slot_mid_visitor_hits', String(oppHits),  'slot-hits');
+  setSlot('slot_mid_cubs_hits',    String(cubsHits), 'slot-hits');
 
   // Ball / Strike / Out from live feed
   if (bso) {
